@@ -1,0 +1,65 @@
+local function appendMicButton()
+		local function pollImage()
+			local newMuted = VoiceChatServiceManager.localMuted
+			local image
+			if newMuted == nil then
+				image = MuteStatusIcons.Loading
+			elseif newMuted then
+				image = MuteStatusIcons.MicOff
+			else
+				image = MuteStatusIcons.MicOn
+			end
+			return image
+		end
+		local function updateIcon()
+			local buttonHint = this.BottomButtonFrame:FindFirstChild("MuteButtonHint", true)
+			if buttonHint then
+				buttonHint.Image = pollImage()
+			end
+		end
+
+		addBottomBarButton("MuteButton", "", "rbxasset://textures/ui/Settings/Help/BButtonLight" .. buttonImageAppend .. ".png",
+			pollImage, UDim2.new(0.5, isTenFootInterface and 300 or 330, 0.5,-25),
+			function ()
+				if not GetFFlagVoiceManagerCheckBeforeTogglingMic() and VoiceChatServiceManager.localMuted == nil then
+					-- Don't do anything if the user isn't in a voice session
+					return
+				end
+				VoiceChatServiceManager:ToggleMic()
+			end, {}, UDim2.new(0,70,0,70),
+			--[[forceHintButton = ]] true
+		)
+		VoiceChatServiceManager.muteChanged.Event:Connect(function(muted)
+			updateIcon()
+		end)
+	end
+
+	local function addMuteButtonToBar()
+		local buttonSize = UDim2.new(0,235,0,70)
+		local buttonOffset = -27.5
+		appendMicButton()
+		updateButtonPosition("LeaveGame", UDim2.new(0.5,(isTenFootInterface and -160 or -130) + buttonOffset,0.5,-25), buttonSize)
+		updateButtonPosition("ResetCharacter", UDim2.new(0.5,(isTenFootInterface and -550 or -400),0.5,-25), buttonSize)
+		updateButtonPosition("Resume", UDim2.new(0.5, (isTenFootInterface and 200 or 140) + buttonOffset * 2, 0.5,-25), buttonSize)
+	end
+
+	local voiceChatServiceConnected = false
+	if GetFFlagEnableVoiceChatPlayersList()
+		and game:GetEngineFeature("VoiceChatSupported")
+		and not voiceChatServiceConnected
+	then
+		voiceChatServiceConnected = true
+		if GetFFlagEnableMicPromptOnLoad() then
+			VoiceChatServiceManager:asyncInit():andThen(function()
+				addMuteButtonToBar()
+				VoiceChatServiceManager:SetupParticipantListeners()
+			end):catch(function()
+				warn('[CoreScripts] VoiceChatServiceManager Players Failed to Init')
+			end)
+		else
+			VoiceChatServiceManager:init()
+			if VoiceChatServiceManager:getService() then
+				VoiceChatServiceManager:SetupParticipantListeners()
+			end
+		end
+	end
