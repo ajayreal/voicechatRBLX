@@ -1,0 +1,51 @@
+if getFFlagEnableVoiceChatPlayersList()
+		and game:GetEngineFeature("VoiceChatSupported")
+		and not voiceChatServiceConnected
+	then
+		if GetFFlagEnableMicPromptOnLoad() then
+			VoiceChatServiceManager:asyncInit():andThen(function()
+				voiceChatServiceConnected = true
+				VoiceChatServiceManager:SetupParticipantListeners()
+				-- This will only affect mobile as buttonContainer is only visibile in mobile
+				addMuteButtonExperience()
+				-- Rerender when the participants state changes
+				VoiceChatServiceManager.participantsUpdate.Event:Connect(function()
+					if GetFFlagEnableVoiceChatPlayersListOptimization() then
+						updateAllMuteButtons()
+					else
+						rebuildPlayerList()
+					end
+				end)
+				VoiceChatServiceManager.participantLeft.Event:Connect(function()
+					if GetFFlagEnableVoiceChatPlayersListOptimization() then
+						updateAllMuteButtons()
+					else
+						rebuildPlayerList()
+					end
+				end)
+			end):catch(function(err)
+				warn('[CoreScripts] VoiceChatServiceManager Players Failed to Init')
+			end)
+		else
+			voiceChatServiceConnected = true
+			VoiceChatServiceManager:init()
+			if VoiceChatServiceManager:getService() then
+				VoiceChatServiceManager:SetupParticipantListeners()
+			end
+			VoiceChatServiceManager.participantsUpdate.Event:Connect(function()
+				if GetFFlagEnableVoiceChatPlayersListOptimization() then
+					updateAllMuteButtons()
+				else
+					rebuildPlayerList()
+				end
+			end)
+			VoiceChatServiceManager.participantLeft.Event:Connect(function()
+				if GetFFlagEnableVoiceChatPlayersListOptimization() then
+					updateAllMuteButtons()
+				else
+					rebuildPlayerList()
+				end
+			end)
+			-- TODO: call GetParticipants so that we start off with a consistent list
+		end
+	end
