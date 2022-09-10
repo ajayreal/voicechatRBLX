@@ -1,0 +1,178 @@
+-- TODO: Remove this when voice chat is unified with sound service.
+	local function syncSoundOutputs()
+		local success, deviceNames, deviceGuids, selectedIndex = pcall(function()
+			return SoundService:GetOutputDevices()
+		end)
+		if success and isValidDeviceList(deviceNames, deviceGuids, selectedIndex) then
+			setVCSOutput(deviceNames[selectedIndex])
+		else
+			warn("Could not connect to Voice Chat Service to change Output Device")
+		end
+	end
+
+	local function createDeviceOptions(deviceType)
+		local selectedIndex = this[deviceType.."DeviceIndex"] or 0
+		local options = this[deviceType.."DeviceNames"] or {}
+		local guids = this[deviceType.."DeviceGuids"] or {}
+
+		local deviceTypeLabel = deviceType
+		local deviceLabel = "Device"
+		if GetFFlagVoiceChatTranslations() then
+			deviceTypeLabel = (deviceType == VOICE_CHAT_DEVICE_TYPE.Input) and RobloxTranslator:FormatByKey("Feature.SettingsHub.GameSettings.Input") or RobloxTranslator:FormatByKey("Feature.SettingsHub.GameSettings.Output")
+			deviceLabel = RobloxTranslator:FormatByKey("Feature.SettingsHub.GameSettings.Device")
+		end
+		this[deviceType.."DeviceFrame"], _, this[deviceType.."DeviceSelector"] = 
+				utility:AddNewRow(this, deviceTypeLabel.." "..deviceLabel, "Selector", options, selectedIndex)
+		this[deviceType.."DeviceFrame"].LayoutOrder = (deviceType == VOICE_CHAT_DEVICE_TYPE.Input) and 6 or 7
+
+		this[deviceType.."DeviceInfo"] = {
+			Name = selectedIndex > 0 and options[selectedIndex] or nil,
+			Guid = selectedIndex > 0 and guids[selectedIndex] or nil,
+		}
+
+		local indexChangedInvocations = 0
+		local indexChangedDelay = GetFIntVoiceChatDeviceChangeDebounceDelay()
+		this[deviceType.."DeviceSelector"].IndexChanged:connect(
+			function(newIndex)
+				if this[deviceType.."DeviceInfo"].Name == this[deviceType.."DeviceNames"][newIndex] and
+					this[deviceType.."DeviceInfo"].Guid == this[deviceType.."DeviceGuids"][newIndex] then
+					return
+				end
+
+				local debounceEnabled = GetFFlagEnableVoiceChatDeviceChangeDebounce()
+				local changeDevice = not debounceEnabled
+
+				if debounceEnabled then
+					local currentInvocation = indexChangedInvocations + 1
+					indexChangedInvocations = currentInvocation
+					wait(indexChangedDelay)
+					changeDevice = currentInvocation == indexChangedInvocations
+				end
+				if changeDevice then
+					indexChangedInvocations = 0
+					this[deviceType.."DeviceInfo"] = {
+						Name = this[deviceType.."DeviceNames"][newIndex],
+						Guid = this[deviceType.."DeviceGuids"][newIndex],
+					}
+
+					local deviceName = this[deviceType.."DeviceInfo"].Name
+					local deviceGuid = this[deviceType.."DeviceInfo"].Guid
+
+					VoiceChatServiceManager:SwitchDevice(deviceType, deviceName, deviceGuid)
+				end
+			end
+		)
+	end
+
+	local function updateVoiceChatDevices(deviceType)
+		if deviceType ~= VOICE_CHAT_DEVICE_TYPE.Input and deviceType ~= VOICE_CHAT_DEVICE_TYPE.Output then
+			warn(deviceType, "is not supported in VoiceChat devices")
+		end
+
+		local success, deviceNames, deviceGuids, selectedIndex = pcall(function()
+			if deviceType == VOICE_CHAT_DEVICE_TYPE.Input then
+				return VoiceChatService:GetMicDevices()
+			else
+				return SoundService:GetOutputDevices()
+			end
+		end)
+
+		local VCSSuccess, VCSDeviceNames, VCSDeviceGuids, VCSIndex = pcall(function ()
+			if GetFFlagEnableVoiceChatOptionsDualServiceOutputs() then
+				return VoiceChatService:GetSpeakerDevices()
+			else
+				-- We're returning these, but because the flag is off they will never be used outside of the below check
+				return deviceNames, deviceGuids, selectedIndex
+			end
+		end)
+
+		if success and VCSSuccess and isValidDeviceList(deviceNames, deviceGuids, selectedIndex)
+			and isValidDeviceList(VCSDeviceNames, VCSDeviceGuids, VCSIndex) then
+			this[deviceType.."DeviceNames"] = deviceNames
+			this[deviceType.."VCSDeviceNames"] = VCSDeviceNames
+			this[deviceType.."VCSDeviceGuids"] = VCSDeviceGuids
+			this[deviceType.."DeviceGuids"] = deviceGuids
+			this[deviceType.."DeviceIndex"] = selectedIndex
+		else
+			warn("Errors in get "..deviceType.." device info")
+			this[deviceType.."DeviceNames"] = {}
+			this[deviceType.."DeviceGuids"] = {}
+			this[deviceType.."VCSDeviceNames"] = {}
+			this[deviceType.."VCSDeviceGuids"] = {}
+			this[deviceType.."DeviceIndex"] = 0
+		end
+
+		if not this[deviceType.."DeviceSelector"] then
+			createDeviceOptions(deviceType)
+		else
+			this[deviceType.."DeviceSelector"]:UpdateOptions(deviceNames)
+			this[deviceType.."DeviceSelector"]:SetSelectionIndex(selectedIndex)
+		end
+	end
+
+	local deviceChangedConnection = nil
+
+	local function updateVoiceChatOptions()
+		updateVoiceChatDevices(VOICE_CHAT_DEVICE_TYPE.Input)
+		updateVoiceChatDevices(VOICE_CHAT_DEVICE_TYPE.Output)
+	end
+
+	local function setupDeviceChangedListener()
+		if SoundService.DeviceListChanged then
+			deviceChangedConnection = SoundService.DeviceListChanged:Connect(function()
+				if this.PageOpen then
+					updateVoiceChatOptions()
+				end
+			end)
+		end
+	end
+
+	local function teardownDeviceChangedListener()
+		if SoundService.DeviceListChanged and deviceChangedConnection then
+			deviceChangedConnection:Disconnect()
+		end
+	end
+
+	-- Check if voice chat is enabled
+	local function checkVoiceChatOptions()
+		if VoiceChatServiceManager:VoiceChatAvailable() then
+			this.VoiceChatOptionsEnabled = true
+			if GetFFlagEnableVoiceChatOptionsDualServiceOutputs() then
+				syncSoundOutputs()
+			end
+			if this.PageOpen then
+				updateVoiceChatOptions()
+			end
+		end
+	end
+
+	this.VoiceChatOptionsEnabled = false
+	if GetFFlagEnableVoiceChatOptions() and game:GetEngineFeature("VoiceChatSupported") then
+		if GetFFlagEnableMicPromptOnLoad() then
+			spawn(function()
+				VoiceChatServiceManager:asyncInit():andThen(function()
+					VoiceChatService = VoiceChatServiceManager:getService()
+					checkVoiceChatOptions()
+
+					-- Check volume settings. Show prompt if volume is 0
+					if GetFFlagEnableVoiceChatErrorToast() then
+						VoiceChatServiceManager:CheckAndShowNotAudiblePrompt()
+					end
+				end):catch(function()
+					warn('[CoreScripts] VoiceChatServiceManager Settings Failed to Init')
+
+					-- Check mic permission settings. Show prompt if no permission
+					if GetFFlagEnableVoiceChatErrorToast() then
+						VoiceChatServiceManager:CheckAndShowPermissionPrompt()
+					end
+				end)
+			end)
+		else
+			VoiceChatServiceManager:init()
+			-- TODO: Encapsulate device selection logic inside voiceChatManager
+			VoiceChatService = VoiceChatServiceManager:getService()
+			spawn(function()
+				checkVoiceChatOptions()
+			end)
+		end
+	end
